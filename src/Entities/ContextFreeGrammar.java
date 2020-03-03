@@ -24,17 +24,17 @@ public class ContextFreeGrammar {
 	public static final String REPLACE_NULL_REGEX = "["+NULL_LETTER+"]";
 	public static final String[] REPLACEMENT_VARS_ARRAY = {"P", "R", "K", "W", "Z", "X"};
 	
-	private static Map<String, String> newRewriteRules = new HashMap<String,String>();
-	private static int BREAK_VARS_COUNT = 0;
+	protected Map<String, String> newRewriteRules = new HashMap<String,String>();
+	protected int BREAK_VARS_COUNT = 0;
 	
 	/* **************************************
 	 * ********** Private Variables *********
 	 * **************************************/
-	private Set<String> variableSet; // V
-	private Set<Character> terminalsSet; // Sigma
-	private Multimap<String, String> rewriteRules; // P
-	private String S0; // Start variable
-	private int newVariableNumber = 1;
+	protected Set<String> variableSet; // V
+	protected Set<Character> terminalsSet; // Sigma
+	protected HashMultimap<String, String> rewriteRules; // P
+	protected String S0; // Start variable
+	protected int newVariableNumber = 1;
 	
 	/* **************************************
 	 * ********** Constructors **************
@@ -42,9 +42,12 @@ public class ContextFreeGrammar {
 	public ContextFreeGrammar(Set<String> variableSet, Set<Character> terminalsSet,
 			Multimap<String, String> rewriteRules, String s0) {
 		super();
-		this.variableSet = variableSet;
-		this.terminalsSet = terminalsSet;
-		this.rewriteRules = rewriteRules;
+		this.variableSet = new HashSet<String>();
+		this.variableSet.addAll(variableSet);
+		this.terminalsSet = new HashSet<Character>();
+		this.terminalsSet.addAll(terminalsSet);
+		this.rewriteRules = HashMultimap.create();
+		this.rewriteRules.putAll(rewriteRules);
 		S0 = s0;
 	}
 	
@@ -270,10 +273,12 @@ public class ContextFreeGrammar {
 		/* Need to crate new start non terminal */
 		if (startNonTerminalAppeardRHS == true)
 		{
-			String newStartNonTerminal = S0+"_new";
+			String newStartNonTerminal = "M";
 			rewriteRules.put(newStartNonTerminal, S0);
 			S0 = newStartNonTerminal;
 			variableSet.add(newStartNonTerminal);
+			System.out.println("# Added new start non-terminal " + newStartNonTerminal + " because previous one was located"
+					+ " in the rhs");
 		}
 	}
 
@@ -473,24 +478,21 @@ public class ContextFreeGrammar {
 		
 		for (String var :variableSet)
 		{
-			if (!var.equals(S0))
+			boolean isUsefull = false;
+			for(String varRule: rewriteRules.values())
 			{
-				boolean isUsefull = false;
-				for(String varRule: rewriteRules.get(var))
+				if (!varRule.contains(var))
 				{
-					if (!varRule.contains(var))
-					{
-						isUsefull = true;
-						break;
-					}
+					isUsefull = true;
+					break;
 				}
-				
-				if (isUsefull == false)
-				{
-					System.out.println("# Removed Variable: " + var + " --->" + rewriteRules.get(var).toString() + ", Could not generate any word from this rule");
-					varsToRemoveSet.add(var);
-					rewriteRules.removeAll(var);
-				}
+			}
+			
+			if (isUsefull == false && !var.equals(S0))
+			{
+				System.out.println("# Removed Variable: " + var + " --->" + rewriteRules.get(var).toString() + ", Could not generate any word from this rule");
+				varsToRemoveSet.add(var);
+				rewriteRules.removeAll(var);
 			}
 		}
 		
@@ -511,7 +513,6 @@ public class ContextFreeGrammar {
 		}
 	
 		rewriteRules.values().removeAll(rulesToRemoveSet);
-		
 	}
 
 	private void removeUnderiableVariables() {
@@ -551,6 +552,7 @@ public class ContextFreeGrammar {
 	public String toString()
 	{
 		String contextFreeGrammerString = "";
+		contextFreeGrammerString += "The start symbol is: " + S0 +"\n";
 		contextFreeGrammerString += S0 + " ---> " + rewriteRules.get(S0).toString() + "\n";
 		for (String v : variableSet)
 		{
@@ -752,7 +754,7 @@ public class ContextFreeGrammar {
 		}
 		else
 		{
-			System.out.println("The word can not be derived from the lanaguge");
+			System.out.println("The word: '"+w+"' can not be derived from the lanaguge");
 		}
 	}
 	
@@ -866,9 +868,11 @@ public class ContextFreeGrammar {
 		}
 	}
 
-	public Set<String> generateAllWordWithLength(int length)
+	public Set<String> generateLengthSteps(int length)
 	{
 		Set<String> grammarWords = new HashSet<String>();
+		Set<String> alreadyViewed = new HashSet<String>();
+		
 		if (length < 0)
 		{
 			return grammarWords;
@@ -888,58 +892,85 @@ public class ContextFreeGrammar {
 		 * All the incomplete rules by 1 derive rule
 		 * Following Left TO Right opening
 		 * 
-		 * The number of steps required in CNF Grammar to create a word with length n
-		 * is 2*n + 1
 		 */
-		for (int i = 0; i < length*2+1 ; i++)
+		for (int i = 0; i < length*2 ; i++)
 		{
 			Set<String> nextIncompleteRules = new HashSet<String>();
 			for (String incompleteRule : incompleteRules)
 			{
+				ArrayList<String> incompleteRuleArray = breakToStringArray(incompleteRule);
 				int j = 0;
 				/*
-				 * All terminals should be characters with length 1
-				 * This step is done in order to find the first nonTerminal in the rule
+				 * Find either the first non-terminal, or finish scanning the rule
 				 */
-				while (isTerminal(incompleteRule.substring(j, j+1)) == true)
+				while(j < incompleteRuleArray.size() && !isVariable(incompleteRuleArray.get(j)))
 				{
 					j++;
-					if (j == incompleteRule.length())
-					{
-						break;
-					}
 				}
 				
-				/* It contains only terminals, therfore it is a valid word
-				 * derived from the grammar
+				/* If we reached until the array size it means it is a valid word,
+				 * that contains only nonTerminals
 				 */
-				if (j == incompleteRule.length())
+				if (j == incompleteRuleArray.size())
 				{
 					grammarWords.add(incompleteRule);
 				}
+				/*
+				 * Construct a new string using a replacement of the variable
+				 * Using the rewrite rules of the grammar
+				 */
 				else
 				{
-					int start = j;
-					while (isVariable(incompleteRule.substring(start, j+1)) == false)
+					String varToReplace = incompleteRuleArray.get(j);
+					for (String replacement : rewriteRules.get(varToReplace))
 					{
-						j++;
-					}
-					
-					String firstVariable = incompleteRule.substring(start, j+1);
-					
-					for (String rule : rewriteRules.get(firstVariable))
-					{
-						String incompleteRuleStart = incompleteRule.substring(0,start);
-						String incompleteRuleEnd = incompleteRule.substring(j+1, incompleteRule.length());
-						String newIncompleteRule = incompleteRuleStart+rule+incompleteRuleEnd;
-						nextIncompleteRules.add(newIncompleteRule);
+						String newIncompleteRule = "";
+						for (int k = 0; k<j; k++)
+						{
+							newIncompleteRule+=incompleteRuleArray.get(k);
+						}
+						newIncompleteRule+=replacement;
+						for (int k=j+1; k<incompleteRuleArray.size(); k++)
+						{
+							newIncompleteRule+=incompleteRuleArray.get(k);
+						}
+						
+						/* Remove all epsilon characters */
+						newIncompleteRule = newIncompleteRule.replaceAll(REPLACE_NULL_REGEX, "");
+						
+						if (!alreadyViewed.contains(newIncompleteRule))
+						{
+							nextIncompleteRules.add(newIncompleteRule);
+						}
 					}
 				}
-				
 			}
+			alreadyViewed.addAll(incompleteRules);
 			incompleteRules = nextIncompleteRules;
 		}
 		return grammarWords;
+	}
+	
+	private ArrayList<String> breakToStringArray(String rule) {
+		
+		ArrayList<String> stringArr = new ArrayList<String>();
+		int beginSubstring=0;
+		for(int endSubstring = 1; endSubstring <= rule.length(); endSubstring++)
+		{
+			String subRule = rule.substring(beginSubstring, endSubstring);
+			// $ not part of the SIGMA union Epsilon
+			Character c = '$';
+			if (subRule.length() == 1)
+			{
+				c = subRule.charAt(0);
+			}
+			if (variableSet.contains(subRule) || terminalsSet.contains(c) || c.equals(CFG_2NF.NULL_LETTER))
+			{
+				stringArr.add(subRule);
+				beginSubstring = endSubstring;
+			}
+		}
+		return stringArr;
 	}
 }
 
